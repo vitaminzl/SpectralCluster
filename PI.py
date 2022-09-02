@@ -2,7 +2,6 @@ import sklearn.datasets as ds
 import numpy as np
 import matplotlib.pyplot as plt
 
-
 def get3CircleData(radius, nums, label_name=(1, 2, 3), noise=(0.03, 0.03, 0.03), seed=42):
     """
     该函数用于绘制3个大小不同的圆圈分布数据
@@ -36,6 +35,13 @@ def get3CircleData(radius, nums, label_name=(1, 2, 3), noise=(0.03, 0.03, 0.03),
     return data, label
 
 
+def getDistanceSquare(X):
+    n, m = X.shape
+    G = np.dot(X, X.T)
+    H = np.tile(np.diag(G), (n, 1))
+    return H + H.T - 2 * G
+
+
 def getSimilarMatrix(data, sigma):
     """
     根据高斯核公式获得相似度矩阵
@@ -44,10 +50,7 @@ def getSimilarMatrix(data, sigma):
     :param sigma: 放缩参数
     :return: S_mtx
     """
-    S_mtx = np.zeros((data.shape[0], data.shape[0]))
-    for i in range(data.shape[0]):
-        for j in range(data.shape[0]):
-            S_mtx[i, j] = np.exp(-np.sum((data[i, :] - data[j, :]) ** 2) / (sigma ** 2 * 2))
+    S_mtx = np.exp(-getDistanceSquare(data) / (sigma ** 2 * 2))
     return S_mtx
 
 

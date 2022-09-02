@@ -1,10 +1,8 @@
 # 谱在聚类中的应用
 
-本文主要对谱聚类的几篇论文进行解读，并对一部分的结果进行复现。本文首先从谱聚类的一般过程入手，介绍传统的谱聚类方法NCuts、NJW。针对传统方法的相似度量的缺陷，引入改进方法ZP；又针对特征向量的选择问题，引入改进方法PI。结合以上2种方式，加入TKNN，引入改进方法ROSC，接着对，引入改进方法CAST。最后，对于ROSC和CAST中都提到的Group Effect进行解读。文章结尾补充了幂代法和矩阵求导的内容。复现代码的仓库地址：https://github.com/vitaminzl/SpectralCluster (备用镜像：https://gitee.com/murphy_z/spectral-cluster)。
+本文主要对谱聚类的几篇论文进行解读，并对一部分的结果进行复现。本文首先从谱聚类的一般过程入手，介绍传统的谱聚类方法NCuts、NJW。针对传统方法的相似度量的缺陷，引入改进方法ZP；又针对特征向量的选择问题，引入改进方法PI。结合以上2种方式，加入TKNN，引入改进方法ROSC，接着对ROSC中修正相似度矩阵的缺陷，结合trace lasso正则项，引入改进方法CAST。最后，对于ROSC和CAST中都提到的Group Effect进行解读。文章结尾补充了幂代法和矩阵求导的内容。复现代码的仓库地址：[https://github.com/vitaminzl/SpectralCluster](https://github.com/vitaminzl/SpectralCluster) (备用镜像：[https://gitee.com/murphy_z/spectral-cluster](https://gitee.com/murphy_z/spectral-cluster))。
 
-现有的谱聚类（Spectral Cluster）的方法在多尺度数据表现不佳。
 
-2种方法：一种是适当地放缩相似度矩阵，另一种伪特征向量。
 
 ## Pipeline
 
@@ -22,7 +20,7 @@
 
 <img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-4.png" style="zoom: 33%;" />
 
-我们首先介绍一些远古的谱聚类方法。
+我们首先介绍一些远古的谱聚类方法。Normalized Cut[]
 
 
 
@@ -72,7 +70,7 @@ $$
 \\&=c_1\lambda_1^t\bigg[e_1+\sum\frac{c_2}{c_1}\bigg(\frac{\lambda_i}{\lambda_1}\bigg)^t\vec e_i)\bigg]
 \end{align*}
 $$
-当$t\rightarrow +\infin$时，$\frac{c_2}{c_1}(\frac{\lambda_i}{\lambda_1})^t$会趋向于0。该方法的提出者认为，在有效成分$\vec e_i$的$\lambda_i$往往会接近于$\lambda_1$，而高频的一些噪声成分$\lambda_j$会接近于0。在迭代过程中使得有效成分$\vec e_i$前面的权重和噪声成分前的权重的差距会迅速扩大。
+当$t\rightarrow +\infty$时，$\frac{c_2}{c_1}(\frac{\lambda_i}{\lambda_1})^t$会趋向于0。该方法的提出者认为，在有效成分$\vec e_i$的$\lambda_i$往往会接近于$\lambda_1$，而高频的一些噪声成分$\lambda_j$会接近于0。在迭代过程中使得有效成分$\vec e_i$前面的权重和噪声成分前的权重的差距会迅速扩大。
 
 但是迭代的次数不宜过多，因为最后的结果会趋向于$k\vec 1$，因为$W$的主特征向量就是$\vec 1$。因此我们需设置一个迭代的门限值，以截断迭代过程。具体的算法如下。
 
@@ -110,7 +108,27 @@ def main():
 
 聚类问题转化为图问题时，需要解决邻接问题。定义结点之间的连接常常有2种方式[^4]。第一种如上图左，每个数据选择自己最近的K个邻居相邻接，得到的图被称为K邻接图（K Nearest Neighbor Graph）；第二种如上图右，每个结点选择半径$\epsilon$的邻居相邻接。
 
-Transitive K Nearest Neighbor(TKNN) Graph，是在K邻接图的基础上，增加了一些邻接边。即在其邻接矩阵$W$中，若KNN图中2个点$i,j$邻接，$W_{i,j}=1$，并且若存在2点$i,j$是可达的，即存在一条路，$W_{i,j}=1$。
+![](https://imagehost.vitaminz-image.top/li-spectral-cluster-14.png)
+
+假如我们使用KNN的方法，K取4。如上图a所示，红色结点的4个最近邻用红线连接，绿色结点的4个最近邻用绿线连接。我们会发现，虽然红色的最近邻包括绿色，但绿色不包括红色，我们称红色和绿色不是**相互近邻**。但如图b所示，则红色和绿色则为相互近邻。若2个结点是相互近邻，则称这2个结点**相互可达**。如图c所示，红色与绿色是相互近邻，绿色和黄色相互近邻，那么红色和绿色也**相互可达**。
+
+Transitive K Nearest Neighbor(TKNN) Graph 是指当2个结点时相互可达的，则二者连接一条边。因此其邻接矩阵$W$中，若2个点$i,j$相互可达，$W_{i,j}=W_{j,i}=1$。
+
+构造的过程可描述如下：
+
+* step1: 构造K邻接矩阵$A$，对于结点$i$由$k$个邻居$j$，则$A_{i, j}=1$
+* step2: 构造相互近邻矩阵$A'=A A^T$，若为相互近邻，则为1，否则为0。
+* step3: 寻找$A'$的所有连通分量$S$
+* step4: 对于连通分量$S_i$中的每2个元素$S_{i,j}, S_{i,k}$，令$W_{S_{i,j},S_{i,k}}=W_{S_{i,k},S_{i,j}}=1$，其余为0。
+
+代码如下：
+
+```python
+def getTKNN_W():
+    
+```
+
+
 
 
 
@@ -132,14 +150,14 @@ $$
 $$
 \min_{Z}||X-XZ||_F^2+\alpha_1||Z||_F+\alpha_2||W-Z||_F
 $$
-优化问题的第一项表示最小化噪声，第二项则是$Z$的Frobenius 范数[^12]），它用于第三项平衡，第三项则是减小与前文中TKNN的邻接矩阵$W$的差距。$\alpha_1,\alpha_2$是平衡参数，需要人工设置。
+优化问题的第一项表示最小化噪声，第二项则是$Z$的Frobenius 范数[^12]），为正则化项，用于平衡其他2项，第三项则是减小与前文中TKNN的邻接矩阵$W$的差距。$\alpha_1,\alpha_2$是平衡参数，需要人工设置。
 
 求解以上优化问题，可以先对$Z$求导（[文章的后面](#Derivatives of Matrix)还会做一些补充），使导数为0即可。对三项项求导有
 $$
 \begin{align*}
-\frac{\part ||X-XZ||^2_F}{\part Z}&=-2X^T(X-XZ)\\
-\frac{\part\alpha_1||Z||^2_F}{\part Z}&=2\alpha_1Z\\
-\frac{\part\alpha_2||W-Z||^2_F}{\part Z}&=-2\alpha_2(W-Z)
+\frac{\partial ||X-XZ||^2_F}{\partial Z}&=-2X^T(X-XZ)\\
+\frac{\partial\alpha_1||Z||^2_F}{\partial Z}&=2\alpha_1Z\\
+\frac{\partial\alpha_2||W-Z||^2_F}{\partial Z}&=-2\alpha_2(W-Z)
 \end{align*}
 $$
 三项相加有
@@ -156,11 +174,70 @@ $$
 
 <img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-12.png" style="zoom: 33%;" />
 
+算法第4行中的whiten为白化处理[^15]，是数据预处理的一种常用方法。它类似于PCA，但与PCA不同的是，PCA往往用来降维，而白化则是利用PCA的特征向量，将数据转换到新的特征空间，然后对新的坐标进行方差归一化，目的是去除输入数据的冗余信息。
 
+```python
+def ROSC(data):
+    
+    
+```
+
+
+
+
+
+## Trace Lasso
+
+Trace Lasso[^13]是一种介于L1和L2正则的正则化项。其形式为
+$$
+\Omega(W)=||XDiag(W)||_*
+$$
+其中$X$为已归一化的特征矩阵，即对于特征$\vec x_i$有$\vec x_i \vec x_i^T=1$。$W$为待求参数。$||·||_*$为核范数[^14]（或迹范数）,$||Z||_*=tr(\sqrt{Z^TZ})$，表示所有奇异值之和。
+
+Trace Lasso具有如下性质：
+
+* 当$X^TX=I$时，即特征之间的相关性为0，或者正交，那么
+  $$
+  \Omega(W)=||W||_1
+  $$
+  即退化为1范式。
+
+* 当$X^TX=\vec 1^T\vec 1$时，即所有特征都完全相关，那么
+  $$
+  \Omega(W)=||W||_2
+  $$
+  即退化为2范式
+
+* 其他情况下，在1范式和2范式之间。
+
+Trace Lasso的优点就是它可以根据数据的特征，接近合适的范式，这相比弹性网络更好。
 
 
 
 ## CAST
+
+ROSC方法虽然可以加强类内数据的联系，但没有使得类间的间距增大。
+
+而CAST相比于ROSC的区别就在于修改了优化函数，成为如下形式：
+$$
+\min_{Z} \frac{1}{2} ||\vec x-X\vec z||_2+\alpha_1||XDiag(\vec z)||_*+\frac{\alpha_2}{2}||W-\vec z||_2
+$$
+其中$\vec x$是$X$的其中一个特征向量，$z$是修正相似度矩阵$Z$中的一个向量。于ROSC的主要区别在于范数的选择，通过trace lasso可以使得其具有类内聚合也有类外稀疏的特性。
+
+该优化问题的求解已经超出了我的能力范围，在此直接贴出论文中的算法流程
+
+<img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-15.png" style="zoom: 50%;" />
+
+整个CAST算法的流程如下：
+
+<img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-16.png" style="zoom:50%;" />
+
+对比ROSC，他们的区别就在于求解$Z^*$的方法不同，其余都是一样的。
+
+```python
+def CAST(data):
+    
+```
 
 
 
@@ -192,29 +269,30 @@ $$
 
 * 法则1：若$A,X$为$m\times n$的矩阵，有
   $$
-  \frac{\part tr(A^TX)}{\part X}=\frac{\part tr(X^TA)}{\part X}=A
+  \frac{\partial tr(A^TX)}{\partial X}=\frac{\partial tr(X^TA)}{\partial X}=A
   $$
 
 * 法则2：若$A$为$m\times m$的矩阵，$X$为$m\times n$的矩阵，有
 
 $$
-\frac{\part tr(X^TAX)}{\part X}=AX+A^TX
+\frac{\partial tr(X^TAX)}{\partial X}=AX+A^TX
 $$
 
 因此若求以下导数
 $$
-\frac{\part ||A-BX||^2_F}{\part X}
+\frac{\partial ||A-BX||^2_F}{\partial X}
 $$
 利用以上法则有：
 $$
 \begin{align*}
-\frac{\part||A-BX||^2_F}{\part X}&=\frac{\part tr[(A-BX)^T(A-BX)]}{\part X}\\
-&=\frac{\part tr[(A^T-X^TB^T)(A-BX)]}{\part X}\\
-&=\frac{\part[tr(A^TA)-2tr(A^TBX)+tr(X^TB^TBX)]}{\part X}\\
+\frac{\partial||A-BX||^2_F}{\partial X}&=\frac{\partial tr[(A-BX)^T(A-BX)]}{\partial X}\\
+&=\frac{\partial tr[(A^T-X^TB^T)(A-BX)]}{\partial X}\\
+&=\frac{\partial[tr(A^TA)-2tr(A^TBX)+tr(X^TB^TBX)]}{\partial X}\\
 &=0-2A^TB+B^TBX+B^TBX\\
 &=-2B^T(A+BX)
 \end{align*}
 $$
+
 
 
 ## 问题与总结
@@ -228,7 +306,7 @@ $$
 [^1]: [Li X, Kao B, Luo S, et al. Rosc: Robust spectral clustering on multi-scale data[C]//Proceedings of the 2018 World Wide Web Conference. 2018: 157-166.](https://dl.acm.org/doi/abs/10.1145/3178876.3185993)
 [^2]: [Li X, Kao B, Shan C, et al. CAST: a correlation-based adaptive spectral clustering algorithm on multi-scale data[C]//Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining. 2020: 439-449.](https://dl.acm.org/doi/abs/10.1145/3394486.3403086)
 [^3]: [Zelnik-Manor L, Perona P. Self-tuning spectral clustering[J]. Advances in neural information processing systems, 2004, 17.](https://proceedings.neurips.cc/paper/2004/hash/40173ea48d9567f1f393b20c855bb40b-Abstract.html)
-[^4]: https://csustan.csustan.edu/~tom/Clustering/GraphLaplacian-tutorial.pdf
+[^4]: [https://csustan.csustan.edu/~tom/Clustering/GraphLaplacian-tutorial.pdf](https://csustan.csustan.edu/~tom/Clustering/GraphLaplacian-tutorial.pdf)
 [^5]:[Lin F, Cohen W W. Power iteration clustering[C]//ICML. 2010.](https://openreview.net/forum?id=SyWcksbu-H)
 [^6]: [Li Z, Liu J, Chen S, et al. Noise robust spectral clustering[C]//2007 IEEE 11th International Conference on Computer Vision. IEEE, 2007: 1-8.](https://ieeexplore.ieee.org/abstract/document/4409061)
 [^7]: [Meilă M, Shi J. A random walks view of spectral segmentation[C]//International Workshop on Artificial Intelligence and Statistics. PMLR, 2001: 203-208.](https://proceedings.mlr.press/r3/meila01a.html)
@@ -239,5 +317,8 @@ $$
 
 https://www.cs.huji.ac.il/w~csip/tirgul2.pdf
 
-[^12]: https://mathworld.wolfram.com/FrobeniusNorm.html
+[^12]: [https://mathworld.wolfram.com/FrobeniusNorm.html](https://mathworld.wolfram.com/FrobeniusNorm.html)
 
+[^13]: [Grave E, Obozinski G R, Bach F. Trace lasso: a trace norm regularization for correlated designs[J]. Advances in Neural Information Processing Systems, 2011, 24.](https://proceedings.neurips.cc/paper/2011/hash/33ceb07bf4eeb3da587e268d663aba1a-Abstract.html)
+[^14]: [https://en.wikipedia.org/wiki/Matrix_norm](https://en.wikipedia.org/wiki/Matrix_norm)
+[^15]: [https://en.wikipedia.org/wiki/Whitening_transformation](https://en.wikipedia.org/wiki/Whitening_transformation)
