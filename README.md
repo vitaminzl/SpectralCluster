@@ -1,6 +1,6 @@
 # 谱在聚类中的应用
 
-本文主要对谱聚类的几篇论文进行解读，并对一部分的结果进行复现。本文首先从谱聚类的一般过程入手，介绍传统的谱聚类方法NCuts、NJW。针对传统方法的相似度量的缺陷，引入改进方法ZP；又针对特征向量的选择问题，引入改进方法PI。结合以上2种方式，加入TKNN，引入改进方法ROSC，接着对ROSC中修正相似度矩阵的缺陷，结合trace lasso正则项，引入改进方法CAST。最后，对于ROSC和CAST中都提到的Group Effect进行解读。文章结尾补充了幂代法和矩阵求导的内容。复现代码的仓库地址：[https://github.com/vitaminzl/SpectralCluster](https://github.com/vitaminzl/SpectralCluster) (备用镜像：[https://gitee.com/murphy_z/spectral-cluster](https://gitee.com/murphy_z/spectral-cluster))。
+本文主要对谱聚类的几篇论文进行解读，并对一部分的结果进行复现。本文首先从谱聚类的一般过程入手，介绍传统的谱聚类方法NCuts、NJW。针对传统方法的相似度量的缺陷，引入改进方法ZP；又针对特征向量的选择问题，引入改进方法PI。结合以上2种方式，加入TKNN，引入改进方法ROSC，接着对ROSC中修正相似度矩阵的缺陷，结合trace lasso正则项，引入改进方法CAST。最后，对于ROSC和CAST中都提到的Group Effect进行解读。文章结尾补充了幂代法和矩阵求导的内容。其中我分别对PI方法和ROSC方法进行代码复现。代码的仓库地址：[https://github.com/vitaminzl/SpectralCluster](https://github.com/vitaminzl/SpectralCluster) (备用镜像：[https://gitee.com/murphy_z/spectral-cluster](https://gitee.com/murphy_z/spectral-cluster))。
 
 
 
@@ -20,13 +20,41 @@
 
 <img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-4.png" style="zoom: 33%;" />
 
-我们首先介绍一些远古的谱聚类方法。Normalized Cut[]
+我们首先介绍一些远古的谱聚类方法。Normalized Cut[^8]的想法来源于最小割。如果存在连通图$\mathcal G=\{\mathcal V, \mathcal E\}$，每条边$e_i\in \mathcal E$有着权重$w_i$，为了使得连通图分割成2个连通子图，那么需要移掉一些边。若移掉这些边权之和最小，那么我们称这样的分割方法为最小割。这和聚类非常相似，边权可以表示点和点的联系，若存在两个类，那么类之间的联系应当是比较小的，类内的联系比较大。
+
+所以一种可行的想法是，首先对连通图进行一次取最小割，然后再对连通子图进一步地取最小割，直到到达某一阈值为止。但显然这样存在一个问题，如上图所示，要使去掉边权之和最小，那每次分割肯可能都会倾向于指割掉一条边，这自然不合理。
+
+一种自然的想法使对权重进行归一化处理
+$$
+NCut(A,B)=\frac{cut(A,B)}{assoc(A,V)}+\frac{cut(A,B)}{assoc(B,V)}
+$$
+其中$assoc(A,V)$表示$A$到所有连接的结点权重之和，$cut(A,B)$则是分割后移掉边权之和。所以假如当某一侧的结点非常少时，那么这$cut$的值可能比$assoc$大，极端情况下值分割一个点，那么分母就是0了，则最后的结果是无穷大。
+
+因此利用前面的想法，每次使用$NCut$，然后再对子图进行$NCut$，不断进行二分就可以了。
+
+听起来很简单，但很遗憾的是，求最小割是一个NP难的问题，因此只能求其近似解。
+
+通过一系列的复杂推导（太难了哈哈），可以得到$D^{-\frac{1}{2}}LD^{-\frac{1}{2}}$第2小的特征向量就是对应的最小割。当然这里需要设定一个阈值，因为特征向量求出来是浮点数，但其数据会偏向两级。然后利用上面的二分法求解即可。
+
+但是现在多数使用的NCuts是$\min NCut(A,B)$问题转化为以下优化问题。
+$$
+\min \vec x^T(D^{-\frac{1}{2}}LD^{-\frac{1}{2}})\vec x\\
+st. \vec x^T\vec x=1
+$$
+上面这个形式其实就是瑞丽熵，那么只要取$k$个最小的特征值对应的特征向量进行聚类即可。
 
 
 
 ## NJW
 
-
+NJW算法[^6]是取3个人名的首字母命名的。该算法和NCuts非常类似，甚至可以看作是其变形。
+$$
+\begin{align*}
+D^{-\frac{1}{2}}LD^{-\frac{1}{2}}&=D^{-\frac{1}{2}}(D-S)D^{-\frac{1}{2}}\\
+&=I-D^{-\frac{1}{2}}SD^{\frac{1}{2}}
+\end{align*}
+$$
+所以我们可以转而去求$D^{-\frac{1}{2}}SD^{\frac{1}{2}}$最大的$k$个特征向量，然后进行聚类。
 
 
 
@@ -124,11 +152,23 @@ Transitive K Nearest Neighbor(TKNN) Graph 是指当2个结点时相互可达的�
 代码如下：
 
 ```python
-def getTKNN_W():
-    
+def getTKNN_W(S_mtx, K):
+    N = S_mtx.shape[0]
+    KNN_A = np.zeros((N, N), dtype=np.int32)
+    for i in range(N):
+        idx = np.argsort(S_mtx[i, :])
+        KNN_A[i, idx[(N-K):]] = 1
+    MKNN_A = KNN_A * KNN_A.T
+    G = nx.from_numpy_array(MKNN_A)
+    compo_list = [c for c in nx.connected_components(G)]
+    TKNN_W = np.zeros((N, N), dtype=np.int32)
+    for c_i in compo_list:
+        c = np.array(list(c_i), dtype=np.int32)
+        idx_c = np.tile(c, (len(c), 1))
+        TKNN_W[idx_c.T, idx_c] = 1 - np.identity(len(c))
+
+    return TKNN_W
 ```
-
-
 
 
 
@@ -174,15 +214,56 @@ $$
 
 <img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-12.png" style="zoom: 33%;" />
 
-算法第4行中的whiten为白化处理[^15]，是数据预处理的一种常用方法。它类似于PCA，但与PCA不同的是，PCA往往用来降维，而白化则是利用PCA的特征向量，将数据转换到新的特征空间，然后对新的坐标进行方差归一化，目的是去除输入数据的冗余信息。
+算法第4行中的whiten为白化处理[^9]，是数据预处理的一种常用方法。它类似于PCA，但与PCA不同的是，PCA往往用来降维，而白化则是利用PCA的特征向量，将数据转换到新的特征空间，然后对新的坐标进行方差归一化，目的是去除输入数据的冗余信息。
+
+根据上述算法，以下使用python对其进行复现。
 
 ```python
-def ROSC(data):
-    
-    
+def ROSC(S, C_k, t_k, alpha1, alpha2):
+    W_tknn = getTKNN_W(S, K=t_k)
+    W = np.diag(np.sum(S, axis=0)) @ S
+    X = prep.PIC_k(W, k=C_k)
+    X = prep.whiten(X)
+    X = prep.norm(X)
+    Z = getROSC_Z(X.T, W_tknn, alpha1, alpha2)
+    Z = (np.abs(Z) + np.abs(Z.T)) / 2
+    C = postp.ncuts(Z, C_k)
+    return C
 ```
 
+主函数的代码如下
 
+```python
+def main(data_name):
+    path = "dataset/" + data_name + ".txt"
+    data = np.loadtxt("dataset/Syn.txt", delimiter=',', dtype=np.float64)
+    label = np.loadtxt("dataset/SynLabel.txt", dtype=np.int32)
+    C_k = len(set(label))
+    S = prep.getSimilarMatrix2(data=data)
+    C = ROSC(S, C_k=C_k, t_k=t, alpha1=1, alpha2=0.01)
+    prt, AMI, RI = postp.assess(label_true=label, label_pred=C)
+    print(f"{data_name}\nPurity: {prt}\nAMI: {AMI}\nRI: {RI}\n")
+```
+
+完整代码见https://github.com/vitaminzl/SpectralCluster/blob/master/ROSC.py
+
+![](https://imagehost.vitaminz-image.top/li-spectral-cluster-20.png)
+
+我首先使用了人工合成的数据集，如上图左所示。使用论文中的参数效果并不是很好，然后调整了一下求解TKNN矩阵的K，原文使用的是4，我调整为8，结果效果猛增，甚至优于论文的结果，如上图右所示，只有极个别点分错。不过根据数据集调参还是不科学的哈哈哈😂。其中Purity=0.9861，AMI=0.9307，RI=0.9784。
+
+然后我对TKNN的K参数从1到12开始调整，3个指标的变化曲线如下图所示。感觉变化还是蛮明显的。
+
+<img src="https://imagehost.vitaminz-image.top/li-spectral-cluster-17.png" style="zoom: 67%;" />
+
+以下是5个数据集的实验结果，参数除了TKNN是的K是8以外，其他都和原论文相同，即$\alpha_1=1,\alpha_2=0.01$。大部分的数据集都没有论文的结果好（比论文结果好的加了粗），但也相差不多。除了MNist0127这个数据集是例外，其结果异常地差劲，也不知道是什么原因。
+
+| 数据集    | Purity     | AMI    | RI         |
+| --------- | ---------- | ------ | ---------- |
+| COIL20    | 0.8486     | 0.9339 | 0.9683     |
+| Glass     | **0.6074** | 0.2949 | **0.7233** |
+| MNIST0127 | 0.2767     | 0.0156 | 0.3981     |
+| Isolet    | 0.7067     | 0.6151 | 0.8459     |
+| Yale      | 0.5636     | 0.3215 | 0.7704     |
 
 
 
@@ -218,7 +299,7 @@ Trace Lasso的优点就是它可以根据数据的特征，接近合适的范式
 
 ROSC方法虽然可以加强类内数据的联系，但没有使得类间的间距增大。
 
-而CAST相比于ROSC的区别就在于修改了优化函数，成为如下形式：
+而CAST相比于ROSC的区别就在于修改了优化函数[^2]，成为如下形式：
 $$
 \min_{Z} \frac{1}{2} ||\vec x-X\vec z||_2+\alpha_1||XDiag(\vec z)||_*+\frac{\alpha_2}{2}||W-\vec z||_2
 $$
@@ -234,18 +315,21 @@ $$
 
 对比ROSC，他们的区别就在于求解$Z^*$的方法不同，其余都是一样的。
 
-```python
-def CAST(data):
-    
-```
-
-
+由于Inexcat ALM的算法超出了我的知识范畴，并且最近事情较多，CAST算法的代码并没有复现。若后面有时间再填补空缺。
 
 
 
 ## Group Effect
 
+Group Effect在ROSC和CAST论文中都提及了，以及一篇关于GNN的论文[^7]中也提及了，可以说精髓所在了。
 
+首先定义一些符号：若有一系列的实体$X=\{x_1,x_2,...,x_n\}$，设$w_q$为$W$的第$q$列，设$x_i\rightarrow x_j$表示，$x_i^Tx_j\rightarrow 1$且$||w_i-w_j||_2\rightarrow 0$。
+
+如果矩阵$Z$满足当$x_i\rightarrow x_j$时，有$|Z_{ip}-Z_{jp}|\rightarrow 0$，则称$Z$具有Group Effect。
+
+翻译成人话就是当2个实体足够接近，$Z$矩阵中实体对应的元素也足够的接近。这说明了$Z$矩阵确实能够反映实体之间的联系紧密程度。2个实体足够接近，它可以指实体的特征足够接近，也可以指实体附近的结构接近。事实上在另一篇关于GNN的论文[^7]里还包括了实体附近的结构信息。
+
+可以证明的是，ROSC和CAST中的稀疏矩阵都有Group Effect，证明的过程过于复杂，也超出了我的能力范围了😂。
 
 
 
@@ -253,7 +337,16 @@ def CAST(data):
 
 ### Dominant Eigenvalue
 
-
+若一个方阵$A$存在一系列特征值$\lambda_1,\lambda_2,...,\lambda_n$，且满足$|\lambda_1|>|\lambda_2|\ge...\ge|\lambda_n|$，则称$\lambda_1$为该方阵的主特征值[^10]。前文中的幂迭代法原本就是用来求主特征值的。
+$$
+\begin{align*}
+ A^kq^{(0)} &= A^{k-1}q^{(1)} = ... =Aq^{(k−1)} 
+\\&=a_1A^k\vec  e_1 + a_2A^k\vec e_2,..., +a_nA^k\vec e_n
+\\&=a_1\lambda_1^k  e_1 + a_2\lambda_2^k\vec e_2,..., +a_n\lambda_n^k\vec e_n
+\\&=a_1\lambda_1^k\bigg[e_1+\sum_{i=2}^{n}\frac{a_i}{a_1}\bigg(\frac{\lambda_i}{\lambda_1}\bigg)^k\vec e_i)\bigg]
+\end{align*}
+$$
+经过一系列迭代后又如上式子。显然，当$k\rightarrow\infty$时，$q^{(k)}=Aq^{(k−1)}=A^kq^{(0)}\rightarrow a_1\lambda^kx_1$。并且$[q^{k}]^TAq^{(k)}\approx [q^{(k)}]^T\lambda q^{(k)}=\lambda\|q^{(k)}\|_2=\lambda$，当$\|q^{(k)}\|_2=1$。所以每次迭代需要对$q$进行一次标准化。这样通过经过式子就可求出主特征值了。
 
 
 
@@ -297,7 +390,7 @@ $$
 
 ## 问题与总结
 
-
+在这次深入解读论文的过程中，有很多收获，学到了很多，但也发觉不明白的东西也很多。实验中也遇到各种问题，比如在PI方法的实验中，发现对$W^T=D^{-1}S$的最小特征向量在3圆圈数据集中，具有明显的分层，其分层特征和类别基本一致，这是一次代码写错时发现的。以及论文中出现了非常多优化问题求解，也触及到了很多知识盲区。但同时也激发了我的求知欲望，需要学的东西还有很多。
 
 
 
@@ -308,17 +401,14 @@ $$
 [^3]: [Zelnik-Manor L, Perona P. Self-tuning spectral clustering[J]. Advances in neural information processing systems, 2004, 17.](https://proceedings.neurips.cc/paper/2004/hash/40173ea48d9567f1f393b20c855bb40b-Abstract.html)
 [^4]: [https://csustan.csustan.edu/~tom/Clustering/GraphLaplacian-tutorial.pdf](https://csustan.csustan.edu/~tom/Clustering/GraphLaplacian-tutorial.pdf)
 [^5]:[Lin F, Cohen W W. Power iteration clustering[C]//ICML. 2010.](https://openreview.net/forum?id=SyWcksbu-H)
-[^6]: [Li Z, Liu J, Chen S, et al. Noise robust spectral clustering[C]//2007 IEEE 11th International Conference on Computer Vision. IEEE, 2007: 1-8.](https://ieeexplore.ieee.org/abstract/document/4409061)
-[^7]: [Meilă M, Shi J. A random walks view of spectral segmentation[C]//International Workshop on Artificial Intelligence and Statistics. PMLR, 2001: 203-208.](https://proceedings.mlr.press/r3/meila01a.html)
+[^6]: [Ng A, Jordan M, Weiss Y. On spectral clustering: Analysis and an algorithm[J]. Advances in neural information processing systems, 2001, 14.](https://proceedings.neurips.cc/paper/2001/hash/801272ee79cfde7fa5960571fee36b9b-Abstract.html)
+[^7]: [[Li X, Zhu R, Cheng Y, et al. Finding Global Homophily in Graph Neural Networks When Meeting Heterophily[J]. arXiv preprint arXiv:2205.07308, 2022](https://arxiv.org/abs/2205.07308)
 [^8]: [Shi J, Malik J. Normalized cuts and image segmentation[J]. IEEE Transactions on pattern analysis and machine intelligence, 2000, 22(8): 888-905.](https://ieeexplore.ieee.org/abstract/document/868688)
-[^9]: https://zhuanlan.zhihu.com/p/336250805
-[^10]: [Zelnik-Manor L, Perona P. Self-tuning spectral clustering[J]. Advances in neural information processing systems, 2004, 17.](https://proceedings.neurips.cc/paper/2004/hash/40173ea48d9567f1f393b20c855bb40b-Abstract.html)
+[^9]: [https://en.wikipedia.org/wiki/Whitening_transformation](https://en.wikipedia.org/wiki/Whitening_transformation)
+[^10]: [https://www.cs.huji.ac.il/w~csip/tirgul2.pdf](https://www.cs.huji.ac.il/w~csip/tirgul2.pdf)
 [^11]: [Petersen K B, Pedersen M S. The matrix cookbook[J]. Technical University of Denmark, 2008, 7(15): 510.](https://ece.uwaterloo.ca/~ece602/MISC/matrixcookbook.pdf)
-
-https://www.cs.huji.ac.il/w~csip/tirgul2.pdf
 
 [^12]: [https://mathworld.wolfram.com/FrobeniusNorm.html](https://mathworld.wolfram.com/FrobeniusNorm.html)
 
 [^13]: [Grave E, Obozinski G R, Bach F. Trace lasso: a trace norm regularization for correlated designs[J]. Advances in Neural Information Processing Systems, 2011, 24.](https://proceedings.neurips.cc/paper/2011/hash/33ceb07bf4eeb3da587e268d663aba1a-Abstract.html)
 [^14]: [https://en.wikipedia.org/wiki/Matrix_norm](https://en.wikipedia.org/wiki/Matrix_norm)
-[^15]: [https://en.wikipedia.org/wiki/Whitening_transformation](https://en.wikipedia.org/wiki/Whitening_transformation)

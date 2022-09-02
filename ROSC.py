@@ -45,18 +45,18 @@ def ROSC(S, C_k, t_k, alpha1, alpha2):
     return C
 
 
-def main(data_name):
-    path = "dataset/" + data_name + ".txt"
-    data = np.loadtxt("dataset/Syn.txt", delimiter=',', dtype=np.float64)
-    label = np.loadtxt("dataset/SynLabel.txt", dtype=np.int32)
+def main(data_name, t_k=8, alpha1=1, alpha2=0.01):
+    data = np.loadtxt("dataset/" + data_name + ".txt", delimiter=',', dtype=np.float64)
+    label = np.loadtxt("dataset/" + data_name + "Label.txt", dtype=np.int32)
     C_k = len(set(label))
+    # postp.draw(data[:, 0], data[:, 1], label)
     S = prep.getSimilarMatrix2(data=data)
     # max_t = 12
     # prt_list = np.zeros(max_t)
     # AMI_list = np.zeros(max_t)
     # RI_list = np.zeros(max_t)
     # for t in range(max_t):
-    C = ROSC(S, C_k=C_k, t_k=t, alpha1=1, alpha2=0.01)
+    C = ROSC(S, C_k=C_k, t_k=t_k, alpha1=alpha1, alpha2=alpha2)
     prt, AMI, RI = postp.assess(label_true=label, label_pred=C)
     # prt_list[t] = prt
     # AMI_list[t] = AMI
@@ -69,7 +69,9 @@ def main(data_name):
     # plt.show()
 
     print(f"{data_name}\nPurity: {prt}\nAMI: {AMI}\nRI: {RI}\n")
-    postp.draw(data[:, 0], data[:, 1], C)
+    # postp.draw(data[:, 0], data[:, 1], C)
 
 if __name__ == "__main__":
-    main(data_name="Syn")
+    dataset = ["Syn", "COIL20", "Glass", "Isolet", "Mnist0127", "Yale"]
+    for data_name in dataset:
+        main(data_name=data_name)

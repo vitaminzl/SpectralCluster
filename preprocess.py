@@ -20,13 +20,6 @@ def getDistanceSquare(X):
 
 
 def getSimilarMatrix(data, sigma):
-    """
-    根据高斯核公式获得相似度矩阵
-
-    :param data: (N, M), N是数据的数量
-    :param sigma: 放缩参数
-    :return: S_mtx
-    """
     S_mtx = np.exp(-getDistanceSquare(data) / (sigma ** 2 * 2))
     return S_mtx
 
