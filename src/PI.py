@@ -2,6 +2,7 @@ import sklearn.datasets as ds
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def get3CircleData(radius, nums, label_name=(1, 2, 3), noise=(0.03, 0.03, 0.03), seed=42):
     """
     该函数用于绘制3个大小不同的圆圈分布数据
@@ -95,9 +96,9 @@ def PowerIter(W, iter_nums, labels, eps=1e-5, draw=False, draw_list=(0, 20, 60, 
         v_t = v_t2
         if draw is True and i in draw_list:
             draw3CircleData(idx_list, v_t, labels,
-                            "iteration: " + str(i+1),
+                            "iteration: " + str(i + 1),
                             subplt=True,
-                            sub_num=(2, len(draw_list)//2, cnt))
+                            sub_num=(2, len(draw_list) // 2, cnt))
             cnt += 1
     return v_t
 
@@ -113,5 +114,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

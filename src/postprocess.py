@@ -42,6 +42,7 @@ def draw(x, y, label):
     plt.legend(label_uni, loc='upper right')
     plt.show()
 
+
 def ncuts(L, K, seed=42, eps=1e-15):
     D = np.diag(1 / (np.sqrt(np.sum(L, axis=0)) + eps))
     L = D @ L @ D

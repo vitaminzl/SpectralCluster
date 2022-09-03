@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import preprocess as prep
 import postprocess as postp
+import argparse
 
 
 def getTKNN_W(S_mtx, K):
@@ -46,8 +47,8 @@ def ROSC(S, C_k, t_k, alpha1, alpha2):
 
 
 def main(data_name, t_k=8, alpha1=1, alpha2=0.01):
-    data = np.loadtxt("dataset/" + data_name + ".txt", delimiter=',', dtype=np.float64)
-    label = np.loadtxt("dataset/" + data_name + "Label.txt", dtype=np.int32)
+    data = np.loadtxt("../dataset/" + data_name + ".txt", delimiter=',', dtype=np.float64)
+    label = np.loadtxt("../dataset/" + data_name + "Label.txt", dtype=np.int32)
     C_k = len(set(label))
     # postp.draw(data[:, 0], data[:, 1], label)
     S = prep.getSimilarMatrix2(data=data)
@@ -71,7 +72,14 @@ def main(data_name, t_k=8, alpha1=1, alpha2=0.01):
     print(f"{data_name}\nPurity: {prt}\nAMI: {AMI}\nRI: {RI}\n")
     # postp.draw(data[:, 0], data[:, 1], C)
 
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Spectral Cluster')
+    parser.add_argument('--tknn', type=int, default=8)
+    parser.add_argument('--alpha1', type=float, default=1)
+    parser.add_argument('--alpha2', type=float, default=0.01)
+    args = parser.parse_args()
+
     dataset = ["Syn", "COIL20", "Glass", "Isolet", "Mnist0127", "Yale"]
     for data_name in dataset:
-        main(data_name=data_name)
+        main(data_name=data_name, t_k=args.tknn, alpha1=args.alpha1, alpha2=args.alpha2)
